@@ -9,9 +9,23 @@ export class Bullet {
     this.effects = effects;
   }
 
-  update() {
-    this.x += Math.sin(this.angle) * this.speed;
-    this.y -= Math.cos(this.angle) * this.speed;
+  update(enemies) {
+    const oldX = this.x;
+    const oldY = this.y;
+    this.x += Math.cos(this.angle) * this.speed;
+    this.y += Math.sin(this.angle) * this.speed;
+    if (this.homing && !this.target) {
+      this.target = this.findNearestEnemy(enemies);
+    }
+
+    if (this.homing && this.target) {
+      const dx = this.target.x - this.x;
+      const dy = this.target.y - this.y;
+      this.angle = Math.atan2(dy, dx);
+    }
+  }
+  findNearestEnemy(enemies) {
+    // 实现寻找最近敌人的逻辑
   }
 
   render(ctx) {

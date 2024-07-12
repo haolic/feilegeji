@@ -34,10 +34,10 @@ export class Equipment {
 export class SplitArrowEquipment extends Equipment {
   constructor() {
     super("Split Arrow", (game, bullet) => {
-      const angles = [-Math.PI / 6, 0, Math.PI / 6];
+      const angles = [-Math.PI / 2 - Math.PI / 6, -Math.PI / 2, -Math.PI / 2 + Math.PI / 6];
       return angles.map(
         (angle) =>
-          new Bullet(bullet.x, bullet.y, bullet.speed, bullet.angle + angle, {
+          new Bullet(bullet.x, bullet.y, bullet.speed, angle, {
             ...bullet.effects,
             split: true,
           })
@@ -52,5 +52,15 @@ export class ElectricKnifeEquipment extends Equipment {
       bullet.effects.electric = true;
       return [bullet];
     });
+  }
+}
+
+export class WingmanEquipment extends Equipment {
+  constructor(type) {
+    super(`Wingman (${type})`, (game) => {
+      game.addWingman(type);
+      return [];
+    });
+    this.type = type;
   }
 }

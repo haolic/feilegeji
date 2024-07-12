@@ -1,5 +1,6 @@
 import { Bullet, EnemyManager } from "./bullet.js";
 import { SplitArrowEquipment, ElectricKnifeEquipment } from "./equipment.js";
+import { Wingman } from "./wingman.js";
 
 const DEBUG_MODE = true;
 const GAME_CONFIG = {
@@ -34,6 +35,7 @@ export class Game {
     this.lastEquipmentScore = 0;
     this.scorePerEquipment = GAME_CONFIG.scorePerEquipment;
     this.maxEquipments = GAME_CONFIG.maxEquipments;
+    this.wingmen = [];
   }
 
   update(currentTime) {
@@ -43,7 +45,7 @@ export class Game {
     if (!this.choosingEquipment) {
       this.lastTime = currentTime;
       this.enemyManager.update(currentTime);
-      this.bullets.forEach((bullet) => bullet.update());
+      this.bullets.forEach((bullet) => bullet.update(this.enemyManager.enemies));
       this.bullets = this.bullets.filter(
         (bullet) =>
           !bullet.isOutOfScreen(
@@ -60,6 +62,13 @@ export class Game {
         this.onMaxScoreReached();
       }
       this.checkEquipmentSelection();
+      this.wingmen.forEach((wingman) => {
+        wingman.update(this.player.x, this.player.y);
+        const bullet = wingman.shoot(currentTime);
+        if (bullet) {
+          this.bullets.push(bullet);
+        }
+      });
     }
   }
 
@@ -72,6 +81,7 @@ export class Game {
     );
 
     this.renderGameState();
+    this.wingmen.forEach((wingman) => wingman.render(this.ctx));
 
     if (this.choosingEquipment) {
       this.renderEquipmentChoices();
@@ -112,6 +122,14 @@ export class Game {
     this.bullets.forEach((bullet) => bullet.render(this.ctx));
   }
 
+  addWingman(type) {
+    if (this.wingmen.length < 2) {
+      const x = this.player.x + (type === "left" ? -40 : 40);
+      const y = this.player.y + 20;
+      this.wingmen.push(new Wingman(x, y, type));
+    }
+  }
+
   checkEquipmentSelection() {
     const equipmentCount = Math.floor(this.score / this.scorePerEquipment);
     const lastEquipmentCount = Math.floor(
@@ -131,7 +149,9 @@ export class Game {
     const availableEquipments = [
       new SplitArrowEquipment(),
       new ElectricKnifeEquipment(),
-      // 可以在这里添加更多装备类型
+      new WingmanEquipment("left"),
+      new WingmanEquipment("right"),
+      // ... 其他装备
     ];
     const choices = this.getRandomEquipments(availableEquipments, 2);
     this.presentEquipmentChoices(choices);
@@ -197,7 +217,7 @@ export class Game {
         this.player.x,
         this.player.y - this.player.height / 2,
         5,
-        0,
+        -Math.PI / 2, // 这里已经是正确的，子弹应该向上射击
         {}
       ),
     ];
@@ -218,18 +238,43 @@ export class Game {
       const bullet = this.bullets[i];
       for (let j = this.enemyManager.enemies.length - 1; j >= 0; j--) {
         const enemy = this.enemyManager.enemies[j];
-        if (
-          bullet.x < enemy.x + enemy.width &&
-          bullet.x + bullet.width > enemy.x &&
-          bullet.y < enemy.y + enemy.height &&
-          bullet.y + bullet.height > enemy.y
-        ) {
+        if (this.checkCollision(bullet, enemy)) {
           this.addScore(enemy.score);
           this.enemyManager.enemies.splice(j, 1);
-          if (!bullet.piercing) {
+          
+          if (bullet.effects && bullet.effects.aoe) {
+            // 对周围敌人造成伤害
+            this.dealAoeDamage(bullet, j);
+          }
+
+          if (!bullet.effects || !bullet.effects.piercing) {
             this.bullets.splice(i, 1);
             break;
           }
+        }
+      }
+    }
+  }
+  checkCollision(object1, object2) {
+    return (
+      object1.x < object2.x + object2.width &&
+      object1.x + object1.width > object2.x &&
+      object1.y < object2.y + object2.height &&
+      object1.y + object1.height > object2.y
+    );
+  }
+
+  dealAoeDamage(bullet, excludeIndex) {
+    const aoeRadius = 100;
+    for (let i = this.enemyManager.enemies.length - 1; i >= 0; i--) {
+      if (i !== excludeIndex) {
+        const enemy = this.enemyManager.enemies[i];
+        const distance = Math.sqrt(
+          Math.pow(enemy.x - bullet.x, 2) + Math.pow(enemy.y - bullet.y, 2)
+        );
+        if (distance <= aoeRadius) {
+          this.addScore(Math.floor(enemy.score / 2));
+          this.enemyManager.enemies.splice(i, 1);
         }
       }
     }
