@@ -34,7 +34,11 @@ export class Equipment {
 export class SplitArrowEquipment extends Equipment {
   constructor() {
     super("Split Arrow", (game, bullet) => {
-      const angles = [-Math.PI / 2 - Math.PI / 6, -Math.PI / 2, -Math.PI / 2 + Math.PI / 6];
+      const angles = [
+        -Math.PI / 2 - Math.PI / 6,
+        -Math.PI / 2,
+        -Math.PI / 2 + Math.PI / 6,
+      ];
       return angles.map(
         (angle) =>
           new Bullet(bullet.x, bullet.y, bullet.speed, angle, {
@@ -59,7 +63,7 @@ export class WingmanEquipment extends Equipment {
   constructor(type) {
     super(`Wingman (${type})`, (game) => {
       game.addWingman(type);
-      return [];
+      return []; // 这里不需要返回子弹
     });
     this.type = type;
   }

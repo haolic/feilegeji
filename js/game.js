@@ -1,5 +1,9 @@
 import { Bullet, EnemyManager } from "./bullet.js";
-import { SplitArrowEquipment, ElectricKnifeEquipment } from "./equipment.js";
+import {
+  SplitArrowEquipment,
+  ElectricKnifeEquipment,
+  WingmanEquipment,
+} from "./equipment.js";
 import { Wingman } from "./wingman.js";
 
 const DEBUG_MODE = true;
@@ -23,6 +27,8 @@ export class Game {
       systemInfo.windowWidth,
       systemInfo.windowHeight
     );
+    this.onTouchStart = this.onTouchStart.bind(this);
+    this.handleEquipmentChoice = this.handleEquipmentChoice.bind(this);
     this.bullets = [];
     this.lastTime = 0;
     this.lastShootTime = 0;
@@ -57,6 +63,14 @@ export class Game {
       );
       this.checkCollisions();
       this.checkPlayerCollision(); // 添加这行
+      this.wingmen.forEach((wingman) => {
+        const offsetX = wingman.type === "left" ? -40 : 40;
+        wingman.update(this.player.x + offsetX, this.player.y + 20);
+        const bullet = wingman.shoot(currentTime);
+        if (bullet) {
+          this.bullets.push(bullet);
+        }
+      });
       if (currentTime - this.lastShootTime > this.shootInterval) {
         this.shoot();
         this.lastShootTime = currentTime;
@@ -65,13 +79,6 @@ export class Game {
         this.onMaxScoreReached();
       }
       this.checkEquipmentSelection();
-      this.wingmen.forEach((wingman) => {
-        wingman.update(this.player.x, this.player.y);
-        const bullet = wingman.shoot(currentTime);
-        if (bullet) {
-          this.bullets.push(bullet);
-        }
-      });
     }
   }
 
@@ -192,10 +199,16 @@ export class Game {
   }
 
   addWingman(type) {
-    if (this.wingmen.length < 2) {
+    // 检查是否已经存在该类型的僚机
+    const existingWingman = this.wingmen.find((w) => w.type === type);
+    if (!existingWingman) {
       const x = this.player.x + (type === "left" ? -40 : 40);
       const y = this.player.y + 20;
-      this.wingmen.push(new Wingman(x, y, type));
+      const newWingman = new Wingman(x, y, type);
+      this.wingmen.push(newWingman);
+      console.log(`Added ${type} wingman`); // 添加日志
+    } else {
+      console.log(`${type} wingman already exists`); // 添加日志
     }
   }
 
@@ -224,6 +237,33 @@ export class Game {
     ];
     const choices = this.getRandomEquipments(availableEquipments, 2);
     this.presentEquipmentChoices(choices);
+  }
+  handleEquipmentChoice(touch) {
+    if (!this.choosingEquipment) return;
+
+    const centerX = this.systemInfo.windowWidth / 2;
+    const centerY = this.systemInfo.windowHeight / 2;
+    const buttonWidth = 200;
+    const buttonHeight = 60;
+    const margin = 20;
+
+    this.equipmentChoices.forEach((equipment, index) => {
+      const x = centerX + (index === 0 ? -buttonWidth - margin : margin);
+      const y = centerY - buttonHeight / 2;
+
+      if (
+        touch.clientX >= x &&
+        touch.clientX <= x + buttonWidth &&
+        touch.clientY >= y &&
+        touch.clientY <= y + buttonHeight
+      ) {
+        this.addEquipment(equipment);
+        console.log(`Selected equipment: ${equipment.name}`); // 添加日志
+        this.choosingEquipment = false;
+        this.isPaused = false;
+        this.lastEquipmentScore = this.score;
+      }
+    });
   }
 
   presentEquipmentChoices(choices) {
@@ -281,16 +321,18 @@ export class Game {
   }
 
   shoot() {
+    // 主飞机射击
     let bullets = [
       new Bullet(
         this.player.x,
         this.player.y - this.player.height / 2,
         5,
-        -Math.PI / 2, // 这里已经是正确的，子弹应该向上射击
+        -Math.PI / 2,
         {}
       ),
     ];
 
+    // 应用装备效果
     for (const equipment of this.equipments) {
       let newBullets = [];
       for (const bullet of bullets) {
@@ -300,6 +342,14 @@ export class Game {
     }
 
     this.bullets.push(...bullets);
+
+    // 僚机射击
+    this.wingmen.forEach((wingman) => {
+      const wingmanBullet = wingman.shoot(this.lastTime);
+      if (wingmanBullet) {
+        this.bullets.push(wingmanBullet);
+      }
+    });
   }
 
   checkCollisions() {
@@ -395,9 +445,10 @@ export class Game {
         this.resetGame();
         return;
       }
+    } else if (this.choosingEquipment) {
+      this.handleEquipmentChoice(touch);
     }
   }
-
   onTouchEnd(touch) {
     if (this.gameOver || this.choosingEquipment) return; // 添加这行
 
