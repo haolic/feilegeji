@@ -45,7 +45,9 @@ export class Game {
     if (!this.choosingEquipment) {
       this.lastTime = currentTime;
       this.enemyManager.update(currentTime);
-      this.bullets.forEach((bullet) => bullet.update(this.enemyManager.enemies));
+      this.bullets.forEach((bullet) =>
+        bullet.update(this.enemyManager.enemies)
+      );
       this.bullets = this.bullets.filter(
         (bullet) =>
           !bullet.isOutOfScreen(
@@ -54,6 +56,7 @@ export class Game {
           )
       );
       this.checkCollisions();
+      this.checkPlayerCollision(); // 添加这行
       if (currentTime - this.lastShootTime > this.shootInterval) {
         this.shoot();
         this.lastShootTime = currentTime;
@@ -88,14 +91,80 @@ export class Game {
     }
 
     if (this.gameOver) {
+      this.ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+      this.ctx.fillRect(
+        0,
+        0,
+        this.systemInfo.windowWidth,
+        this.systemInfo.windowHeight
+      );
+
       this.ctx.fillStyle = "white";
       this.ctx.font = "48px Arial";
       this.ctx.textAlign = "center";
       this.ctx.fillText(
         "Game Over",
         this.systemInfo.windowWidth / 2,
-        this.systemInfo.windowHeight / 2
+        this.systemInfo.windowHeight / 2 - 50
       );
+
+      // 显示最终得分
+      this.ctx.font = "24px Arial";
+      this.ctx.fillText(
+        `Final Score: ${this.score}`,
+        this.systemInfo.windowWidth / 2,
+        this.systemInfo.windowHeight / 2 + 20
+      );
+
+      // 绘制"Restart"按钮
+      this.ctx.fillStyle = "green";
+      this.ctx.fillRect(
+        this.systemInfo.windowWidth / 2 - 60,
+        this.systemInfo.windowHeight / 2 + 50,
+        120,
+        40
+      );
+      this.ctx.fillStyle = "white";
+      this.ctx.font = "20px Arial";
+      this.ctx.fillText(
+        "Restart",
+        this.systemInfo.windowWidth / 2,
+        this.systemInfo.windowHeight / 2 + 75
+      );
+    }
+  }
+
+  resetGame() {
+    this.player = {
+      x: this.systemInfo.windowWidth / 2,
+      y: this.systemInfo.windowHeight * 0.8,
+      width: 50,
+      height: 50,
+    };
+    this.enemyManager = new EnemyManager(
+      this.ctx,
+      this.systemInfo.windowWidth,
+      this.systemInfo.windowHeight
+    );
+    this.bullets = [];
+    this.lastTime = 0;
+    this.lastShootTime = 0;
+    this.gameOver = false;
+    this.score = 0;
+    this.equipments = [];
+    this.isPaused = false;
+    this.lastEquipmentScore = 0;
+    this.wingmen = [];
+    this.choosingEquipment = false;
+  }
+
+  checkPlayerCollision() {
+    for (const enemy of this.enemyManager.enemies) {
+      if (this.checkCollision(this.player, enemy)) {
+        this.gameOver = true;
+        console.log("Game Over: Player collided with enemy");
+        break;
+      }
     }
   }
 
@@ -241,7 +310,7 @@ export class Game {
         if (this.checkCollision(bullet, enemy)) {
           this.addScore(enemy.score);
           this.enemyManager.enemies.splice(j, 1);
-          
+
           if (bullet.effects && bullet.effects.aoe) {
             // 对周围敌人造成伤害
             this.dealAoeDamage(bullet, j);
@@ -311,33 +380,21 @@ export class Game {
   }
 
   onTouchStart(touch) {
-    if (this.choosingEquipment) {
-      // 处理装备选择逻辑
-      const centerX = this.systemInfo.windowWidth / 2;
-      const centerY = this.systemInfo.windowHeight / 2;
-      const buttonWidth = 200;
-      const buttonHeight = 60;
-      const margin = 20;
+    if (this.gameOver) {
+      const restartButtonX = this.systemInfo.windowWidth / 2 - 60;
+      const restartButtonY = this.systemInfo.windowHeight / 2 + 50;
+      const restartButtonWidth = 120;
+      const restartButtonHeight = 40;
 
-      this.equipmentChoices.forEach((equipment, index) => {
-        const x = centerX + (index === 0 ? -buttonWidth - margin : margin);
-        const y = centerY - buttonHeight / 2;
-
-        if (
-          touch.clientX >= x &&
-          touch.clientX <= x + buttonWidth &&
-          touch.clientY >= y &&
-          touch.clientY <= y + buttonHeight
-        ) {
-          this.addEquipment(equipment);
-          this.choosingEquipment = false;
-          this.lastEquipmentScore =
-            Math.floor(this.score / this.scorePerEquipment) *
-            this.scorePerEquipment;
-        }
-      });
-    } else if (!this.gameOver) {
-      // 正常游戏中的触摸开始逻辑（如果有的话）
+      if (
+        touch.clientX >= restartButtonX &&
+        touch.clientX <= restartButtonX + restartButtonWidth &&
+        touch.clientY >= restartButtonY &&
+        touch.clientY <= restartButtonY + restartButtonHeight
+      ) {
+        this.resetGame();
+        return;
+      }
     }
   }
 

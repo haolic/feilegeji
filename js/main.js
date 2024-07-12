@@ -35,11 +35,13 @@ class Main {
   }
 
   loop(currentTime) {
-    const deltaTime = currentTime - this.lastTime;
     this.lastTime = currentTime;
+    
+    // 即使游戏结束，也继续更新和渲染
     this.game.update(currentTime);
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     this.game.render();
+    
     requestAnimationFrame(this.loop.bind(this));
   }
 }
