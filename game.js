@@ -1,4 +1,1 @@
-
-import Main from './js/main'
-
-new Main()
+import "./js/game.js";

@@ -1,457 +1,264 @@
-import { Bullet, EnemyManager } from "./bullet.js";
-import {
-  SplitArrowEquipment,
-  ElectricKnifeEquipment,
-  WingmanEquipment,
-} from "./equipment.js";
-import { Wingman } from "./wingman.js";
-
-const DEBUG_MODE = true;
-const GAME_CONFIG = {
-  scorePerEquipment: DEBUG_MODE ? 40 : 500,
-  maxEquipments: 6,
-};
+// 创建 Canvas
+const canvas = wx.createCanvas();
+const ctx = canvas.getContext("2d");
 
 export class Game {
-  constructor(ctx, systemInfo) {
-    this.ctx = ctx;
-    this.systemInfo = systemInfo;
-    this.player = {
-      x: systemInfo.windowWidth / 2,
-      y: systemInfo.windowHeight * 0.8,
-      width: 50,
-      height: 50,
+  constructor(rows, cols) {
+    this.rows = rows;
+    this.cols = cols;
+    this.cellSize = 60; // 设置方块大小为60x60像素
+    this.width = this.cols * this.cellSize;
+    this.height = this.rows * this.cellSize;
+
+    // 计算游戏区域在屏幕上的位置，使其居中
+    this.offsetX = (canvas.width - this.width) / 2;
+    this.offsetY = (canvas.height - this.height) / 2;
+
+    this.grid = [];
+    this.path = [];
+    this.startCell = null;
+    this.targetCell = null;
+    this.currentNumber = 1;
+    this.touchActive = false;
+
+    this.initGrid();
+    this.setStartCell();
+    this.setTargetCell();
+    this.resetGame = this.resetGame.bind(this);
+  }
+
+  initGrid() {
+    for (let y = 0; y < this.rows; y++) {
+      this.grid[y] = [];
+      for (let x = 0; x < this.cols; x++) {
+        this.grid[y][x] = { type: "empty", number: null };
+      }
+    }
+  }
+
+  setStartCell() {
+    const x = 0;
+    const y = 0;
+    this.startCell = { x, y };
+    this.grid[y][x] = { type: "start", number: 1 };
+  }
+
+  setTargetCell() {
+    let x, y;
+    do {
+      x = Math.floor(Math.random() * this.cols);
+      y = Math.floor(Math.random() * this.rows);
+    } while (x === this.startCell.x && y === this.startCell.y);
+
+    this.targetCell = { x, y };
+    this.grid[y][x] = {
+      type: "target",
+      number: Math.floor(Math.random() * 19) + 2,
     };
-    this.enemyManager = new EnemyManager(
-      ctx,
-      systemInfo.windowWidth,
-      systemInfo.windowHeight
-    );
-    this.onTouchStart = this.onTouchStart.bind(this);
-    this.handleEquipmentChoice = this.handleEquipmentChoice.bind(this);
-    this.bullets = [];
-    this.lastTime = 0;
-    this.lastShootTime = 0;
-    this.shootInterval = 500;
-    this.gameOver = false;
-    this.score = 0;
-    this.maxScore = 3000;
-    this.equipments = [];
-    this.isPaused = false;
-    this.lastEquipmentScore = 0;
-    this.scorePerEquipment = GAME_CONFIG.scorePerEquipment;
-    this.maxEquipments = GAME_CONFIG.maxEquipments;
-    this.wingmen = [];
   }
 
-  update(currentTime) {
-    if (this.gameOver) return;
+  startTouch(x, y) {
+    const gridX = Math.floor((x - this.offsetX) / this.cellSize);
+    const gridY = Math.floor((y - this.offsetY) / this.cellSize);
+    if (gridX === this.startCell.x && gridY === this.startCell.y) {
+      this.touchActive = true;
+      this.path = [{ x: gridX, y: gridY }];
+      this.currentNumber = 1;
+    }
+  }
 
-    // 只在不选择装备时更新游戏状态
-    if (!this.choosingEquipment) {
-      this.lastTime = currentTime;
-      this.enemyManager.update(currentTime);
-      this.bullets.forEach((bullet) =>
-        bullet.update(this.enemyManager.enemies)
-      );
-      this.bullets = this.bullets.filter(
-        (bullet) =>
-          !bullet.isOutOfScreen(
-            this.systemInfo.windowHeight,
-            this.systemInfo.windowWidth
-          )
-      );
-      this.checkCollisions();
-      this.checkPlayerCollision(); // 添加这行
-      this.wingmen.forEach((wingman) => {
-        const offsetX = wingman.type === "left" ? -40 : 40;
-        wingman.update(this.player.x + offsetX, this.player.y + 20);
-        const bullet = wingman.shoot(currentTime);
-        if (bullet) {
-          this.bullets.push(bullet);
+  moveTouch(x, y) {
+    if (!this.touchActive) return;
+
+    const gridX = Math.floor((x - this.offsetX) / this.cellSize);
+    const gridY = Math.floor((y - this.offsetY) / this.cellSize);
+    const lastCell = this.path[this.path.length - 1];
+
+    if (this.isValidMove(lastCell, { x: gridX, y: gridY })) {
+      // 检查是否是回退
+      const isBacktrack =
+        this.path.length > 1 &&
+        this.path[this.path.length - 2].x === gridX &&
+        this.path[this.path.length - 2].y === gridY;
+
+      if (isBacktrack) {
+        // 回退操作
+        const removedCell = this.path.pop();
+        if (this.grid[removedCell.y][removedCell.x].type !== "target") {
+          this.grid[removedCell.y][removedCell.x] = {
+            type: "empty",
+            number: null,
+          };
         }
-      });
-      if (currentTime - this.lastShootTime > this.shootInterval) {
-        this.shoot();
-        this.lastShootTime = currentTime;
+        this.currentNumber--;
+      } else {
+        // 非回退操作
+        const cellType = this.grid[gridY][gridX].type;
+
+        // 只有当格子是空的或者是目标格子时才允许移动
+        if (cellType === "empty" || cellType === "target") {
+          if (cellType === "target") {
+            // 移动到目标格子
+            if (this.currentNumber + 1 === this.grid[gridY][gridX].number) {
+              this.addToPath(gridX, gridY);
+            }
+          } else {
+            // 正常移动到空格子
+            this.addToPath(gridX, gridY);
+          }
+        }
       }
-      if (this.score >= this.maxScore) {
-        this.onMaxScoreReached();
-      }
-      this.checkEquipmentSelection();
     }
   }
 
-  render() {
-    this.ctx.clearRect(
-      0,
-      0,
-      this.systemInfo.windowWidth,
-      this.systemInfo.windowHeight
-    );
-
-    this.renderGameState();
-    this.wingmen.forEach((wingman) => wingman.render(this.ctx));
-
-    if (this.choosingEquipment) {
-      this.renderEquipmentChoices();
+  endTouch() {
+    this.touchActive = false;
+    if (this.isGameWon()) {
+      console.log("Game Won!");
     }
+  }
 
-    if (this.gameOver) {
-      this.ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
-      this.ctx.fillRect(
-        0,
-        0,
-        this.systemInfo.windowWidth,
-        this.systemInfo.windowHeight
-      );
+  isValidMove(from, to) {
+    return (
+      (Math.abs(from.x - to.x) === 1 && from.y === to.y) ||
+      (Math.abs(from.y - to.y) === 1 && from.x === to.x)
+    );
+  }
 
-      this.ctx.fillStyle = "white";
-      this.ctx.font = "48px Arial";
-      this.ctx.textAlign = "center";
-      this.ctx.fillText(
-        "Game Over",
-        this.systemInfo.windowWidth / 2,
-        this.systemInfo.windowHeight / 2 - 50
-      );
+  addToPath(x, y) {
+    this.path.push({ x, y });
+    this.currentNumber++;
+    if (this.grid[y][x].type !== "target") {
+      this.grid[y][x] = { type: "path", number: this.currentNumber };
+    }
+  }
 
-      // 显示最终得分
-      this.ctx.font = "24px Arial";
-      this.ctx.fillText(
-        `Final Score: ${this.score}`,
-        this.systemInfo.windowWidth / 2,
-        this.systemInfo.windowHeight / 2 + 20
-      );
+  isGameWon() {
+    return this.path.length === this.rows * this.cols;
+  }
 
-      // 绘制"Restart"按钮
-      this.ctx.fillStyle = "green";
-      this.ctx.fillRect(
-        this.systemInfo.windowWidth / 2 - 60,
-        this.systemInfo.windowHeight / 2 + 50,
-        120,
-        40
-      );
-      this.ctx.fillStyle = "white";
-      this.ctx.font = "20px Arial";
-      this.ctx.fillText(
-        "Restart",
-        this.systemInfo.windowWidth / 2,
-        this.systemInfo.windowHeight / 2 + 75
-      );
+  draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 绘制游戏背景
+    ctx.fillStyle = "white";
+    ctx.fillRect(this.offsetX, this.offsetY, this.width, this.height);
+
+    for (let y = 0; y < this.rows; y++) {
+      for (let x = 0; x < this.cols; x++) {
+        const cell = this.grid[y][x];
+        const cellX = this.offsetX + x * this.cellSize;
+        const cellY = this.offsetY + y * this.cellSize;
+
+        ctx.fillStyle = this.getCellColor(cell.type);
+        ctx.fillRect(cellX, cellY, this.cellSize, this.cellSize);
+
+        if (cell.number) {
+          ctx.fillStyle = "white";
+          ctx.font = "20px Arial";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(
+            cell.number,
+            cellX + this.cellSize / 2,
+            cellY + this.cellSize / 2
+          );
+        }
+
+        // 绘制网格线
+        ctx.strokeStyle = "#ccc";
+        ctx.strokeRect(cellX, cellY, this.cellSize, this.cellSize);
+      }
+    }
+    if (this.isWon) {
+      ctx.fillStyle = "rgba(0, 0, 0, 0.7)"; // 半透明黑色背景
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "gold";
+      ctx.font = "bold 48px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("胜利", canvas.width / 2, canvas.height / 2);
+    }
+  }
+
+  getCellColor(type) {
+    switch (type) {
+      case "empty":
+        return "#f0f0f0";
+      case "start":
+        return "red";
+      case "target":
+        return "blue";
+      case "path":
+        return "green";
+      default:
+        return "white";
     }
   }
 
   resetGame() {
-    this.player = {
-      x: this.systemInfo.windowWidth / 2,
-      y: this.systemInfo.windowHeight * 0.8,
-      width: 50,
-      height: 50,
+    // 保存当前的目标方块信息
+    const targetCell = this.targetCell;
+    const targetNumber = this.grid[targetCell.y][targetCell.x].number;
+
+    // 重新初始化网格，但不重新设置目标方块
+    this.initGrid();
+    this.setStartCell();
+
+    // 恢复目标方块
+    this.targetCell = targetCell;
+    this.grid[targetCell.y][targetCell.x] = {
+      type: "target",
+      number: targetNumber,
     };
-    this.enemyManager = new EnemyManager(
-      this.ctx,
-      this.systemInfo.windowWidth,
-      this.systemInfo.windowHeight
-    );
-    this.bullets = [];
-    this.lastTime = 0;
-    this.lastShootTime = 0;
-    this.gameOver = false;
-    this.score = 0;
-    this.equipments = [];
-    this.isPaused = false;
-    this.lastEquipmentScore = 0;
-    this.wingmen = [];
-    this.choosingEquipment = false;
-  }
 
-  checkPlayerCollision() {
-    for (const enemy of this.enemyManager.enemies) {
-      if (this.checkCollision(this.player, enemy)) {
-        this.gameOver = true;
-        console.log("Game Over: Player collided with enemy");
-        break;
-      }
-    }
-  }
-
-  renderGameState() {
-    // 渲染分数
-    this.ctx.fillStyle = "white";
-    this.ctx.font = "24px Arial";
-    this.ctx.textAlign = "left";
-    this.ctx.fillText(`Score: ${this.score}`, 10, 50);
-
-    // 渲染玩家
-    this.ctx.fillStyle = "blue";
-    this.ctx.fillRect(
-      this.player.x - this.player.width / 2,
-      this.player.y - this.player.height / 2,
-      this.player.width,
-      this.player.height
-    );
-
-    // 渲染敌人
-    this.enemyManager.render();
-
-    // 渲染子弹
-    this.bullets.forEach((bullet) => bullet.render(this.ctx));
-  }
-
-  addWingman(type) {
-    // 检查是否已经存在该类型的僚机
-    const existingWingman = this.wingmen.find((w) => w.type === type);
-    if (!existingWingman) {
-      const x = this.player.x + (type === "left" ? -40 : 40);
-      const y = this.player.y + 20;
-      const newWingman = new Wingman(x, y, type);
-      this.wingmen.push(newWingman);
-      console.log(`Added ${type} wingman`); // 添加日志
-    } else {
-      console.log(`${type} wingman already exists`); // 添加日志
-    }
-  }
-
-  checkEquipmentSelection() {
-    const equipmentCount = Math.floor(this.score / this.scorePerEquipment);
-    const lastEquipmentCount = Math.floor(
-      this.lastEquipmentScore / this.scorePerEquipment
-    );
-
-    if (
-      equipmentCount > lastEquipmentCount &&
-      this.equipments.length < this.maxEquipments
-    ) {
-      this.choosingEquipment = true;
-      this.offerEquipmentChoice();
-    }
-  }
-
-  offerEquipmentChoice() {
-    const availableEquipments = [
-      new SplitArrowEquipment(),
-      new ElectricKnifeEquipment(),
-      new WingmanEquipment("left"),
-      new WingmanEquipment("right"),
-      // ... 其他装备
-    ];
-    const choices = this.getRandomEquipments(availableEquipments, 2);
-    this.presentEquipmentChoices(choices);
-  }
-  handleEquipmentChoice(touch) {
-    if (!this.choosingEquipment) return;
-
-    const centerX = this.systemInfo.windowWidth / 2;
-    const centerY = this.systemInfo.windowHeight / 2;
-    const buttonWidth = 200;
-    const buttonHeight = 60;
-    const margin = 20;
-
-    this.equipmentChoices.forEach((equipment, index) => {
-      const x = centerX + (index === 0 ? -buttonWidth - margin : margin);
-      const y = centerY - buttonHeight / 2;
-
-      if (
-        touch.clientX >= x &&
-        touch.clientX <= x + buttonWidth &&
-        touch.clientY >= y &&
-        touch.clientY <= y + buttonHeight
-      ) {
-        this.addEquipment(equipment);
-        console.log(`Selected equipment: ${equipment.name}`); // 添加日志
-        this.choosingEquipment = false;
-        this.isPaused = false;
-        this.lastEquipmentScore = this.score;
-      }
-    });
-  }
-
-  presentEquipmentChoices(choices) {
-    this.equipmentChoices = choices;
-    this.choosingEquipment = true;
-    this.isPaused = true;
-  }
-
-  renderEquipmentChoices() {
-    const margin = 20;
-    const buttonWidth = 200;
-    const buttonHeight = 60;
-    const centerX = this.systemInfo.windowWidth / 2;
-    const centerY = this.systemInfo.windowHeight / 2;
-
-    // 添加半透明背景
-    this.ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
-    this.ctx.fillRect(
-      0,
-      0,
-      this.systemInfo.windowWidth,
-      this.systemInfo.windowHeight
-    );
-
-    this.ctx.fillStyle = "white";
-    this.ctx.font = "24px Arial";
-    this.ctx.textAlign = "center";
-    this.ctx.fillText("选择装备", centerX, centerY - 100);
-
-    this.equipmentChoices.forEach((equipment, index) => {
-      const x = centerX + (index === 0 ? -buttonWidth - margin : margin);
-      const y = centerY - buttonHeight / 2;
-
-      this.ctx.fillStyle = "blue";
-      this.ctx.fillRect(x, y, buttonWidth, buttonHeight);
-
-      this.ctx.fillStyle = "white";
-      this.ctx.fillText(
-        equipment.name,
-        x + buttonWidth / 2,
-        y + buttonHeight / 2 + 8
-      );
-    });
-  }
-
-  addEquipment(equipment) {
-    if (this.equipments.length < this.maxEquipments) {
-      this.equipments.push(equipment);
-      console.log(`Added equipment: ${equipment.name}`);
-    }
-  }
-
-  getRandomEquipments(equipments, count) {
-    return equipments.sort(() => 0.5 - Math.random()).slice(0, count);
-  }
-
-  shoot() {
-    // 主飞机射击
-    let bullets = [
-      new Bullet(
-        this.player.x,
-        this.player.y - this.player.height / 2,
-        5,
-        -Math.PI / 2,
-        {}
-      ),
-    ];
-
-    // 应用装备效果
-    for (const equipment of this.equipments) {
-      let newBullets = [];
-      for (const bullet of bullets) {
-        newBullets = newBullets.concat(equipment.apply(this, bullet));
-      }
-      bullets = newBullets;
-    }
-
-    this.bullets.push(...bullets);
-
-    // 僚机射击
-    this.wingmen.forEach((wingman) => {
-      const wingmanBullet = wingman.shoot(this.lastTime);
-      if (wingmanBullet) {
-        this.bullets.push(wingmanBullet);
-      }
-    });
-  }
-
-  checkCollisions() {
-    for (let i = this.bullets.length - 1; i >= 0; i--) {
-      const bullet = this.bullets[i];
-      for (let j = this.enemyManager.enemies.length - 1; j >= 0; j--) {
-        const enemy = this.enemyManager.enemies[j];
-        if (this.checkCollision(bullet, enemy)) {
-          this.addScore(enemy.score);
-          this.enemyManager.enemies.splice(j, 1);
-
-          if (bullet.effects && bullet.effects.aoe) {
-            // 对周围敌人造成伤害
-            this.dealAoeDamage(bullet, j);
-          }
-
-          if (!bullet.effects || !bullet.effects.piercing) {
-            this.bullets.splice(i, 1);
-            break;
-          }
-        }
-      }
-    }
-  }
-  checkCollision(object1, object2) {
-    return (
-      object1.x < object2.x + object2.width &&
-      object1.x + object1.width > object2.x &&
-      object1.y < object2.y + object2.height &&
-      object1.y + object1.height > object2.y
-    );
-  }
-
-  dealAoeDamage(bullet, excludeIndex) {
-    const aoeRadius = 100;
-    for (let i = this.enemyManager.enemies.length - 1; i >= 0; i--) {
-      if (i !== excludeIndex) {
-        const enemy = this.enemyManager.enemies[i];
-        const distance = Math.sqrt(
-          Math.pow(enemy.x - bullet.x, 2) + Math.pow(enemy.y - bullet.y, 2)
-        );
-        if (distance <= aoeRadius) {
-          this.addScore(Math.floor(enemy.score / 2));
-          this.enemyManager.enemies.splice(i, 1);
-        }
-      }
-    }
-  }
-
-  addScore(points) {
-    this.score = Math.min(this.score + points, this.maxScore);
-    this.checkEquipmentSelection();
-  }
-
-  onMaxScoreReached() {
-    console.log("Maximum score reached!");
-  }
-
-  onTouchMove(touch) {
-    if (this.gameOver || this.choosingEquipment) return; // 添加这行
-
-    this.player.x = touch.clientX;
-    this.player.y = touch.clientY;
-    this.player.x = Math.max(
-      this.player.width / 2,
-      Math.min(
-        this.player.x,
-        this.systemInfo.windowWidth - this.player.width / 2
-      )
-    );
-    this.player.y = Math.max(
-      this.player.height / 2,
-      Math.min(
-        this.player.y,
-        this.systemInfo.windowHeight - this.player.height / 2
-      )
-    );
+    // 重置路径和当前数字
+    this.path = [];
+    this.currentNumber = 1;
   }
 
   onTouchStart(touch) {
-    if (this.gameOver) {
-      const restartButtonX = this.systemInfo.windowWidth / 2 - 60;
-      const restartButtonY = this.systemInfo.windowHeight / 2 + 50;
-      const restartButtonWidth = 120;
-      const restartButtonHeight = 40;
+    this.startTouch(touch.clientX, touch.clientY);
+  }
 
-      if (
-        touch.clientX >= restartButtonX &&
-        touch.clientX <= restartButtonX + restartButtonWidth &&
-        touch.clientY >= restartButtonY &&
-        touch.clientY <= restartButtonY + restartButtonHeight
-      ) {
-        this.resetGame();
-        return;
-      }
-    } else if (this.choosingEquipment) {
-      this.handleEquipmentChoice(touch);
+  onTouchMove(touch) {
+    this.moveTouch(touch.clientX, touch.clientY);
+  }
+
+  onTouchEnd() {
+    this.touchActive = false;
+    if (this.isGameWon()) {
+      console.log("Game Won!");
+      this.isWon = true; // 标记游戏胜利
+      // 在这里可以添加一个延时，比如3秒后重置游戏
+      setTimeout(() => {
+        this.isWon = false;
+        this.initGrid();
+        this.setStartCell();
+        this.setTargetCell();
+        this.path = [];
+        this.currentNumber = 1;
+      }, 3000);
+    } else {
+      this.resetGame();
     }
   }
-  onTouchEnd(touch) {
-    if (this.gameOver || this.choosingEquipment) return; // 添加这行
-
-    // 正常游戏中的触摸结束逻辑（如果有的话）
-  }
 }
+
+// 创建游戏实例
+const game = new Game(5, 4);
+
+// 游戏循环
+function gameLoop() {
+  game.draw();
+  requestAnimationFrame(gameLoop);
+}
+
+// 触摸事件监听
+wx.onTouchStart((e) => game.onTouchStart(e.touches[0]));
+wx.onTouchMove((e) => game.onTouchMove(e.touches[0]));
+wx.onTouchEnd(() => game.onTouchEnd());
+
+// 开始游戏循环
+gameLoop();
